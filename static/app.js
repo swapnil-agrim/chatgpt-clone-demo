@@ -1,4 +1,4 @@
-// Frontend (goal: conversation list + create + select). Streaming send arrives next goal.
+// Frontend: conversation list + create + select + live SSE streaming.
 const messagesEl = document.getElementById("messages");
 const promptEl = document.getElementById("prompt");
 const listEl = document.getElementById("conversations");
@@ -23,7 +23,7 @@ function showEmptyHint() {
   messagesEl.appendChild(hint);
 }
 
-// XSS-safe message rendering — textContent only, never innerHTML with model/user data.
+// XSS-safe — textContent only, never innerHTML with model/user data.
 function addMessageEl(role, content) {
   const hint = document.getElementById("empty-hint");
   if (hint) hint.remove();
@@ -73,7 +73,52 @@ async function newChat() {
   showEmptyHint();
 }
 
+function handleFrame(frame, target) {
+  let event = "message", data = "";
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data += line.slice(5).trim();
+  }
+  if (event === "done") return;
+  if (event === "error") { target.textContent += "\n[stream error]"; return; }
+  try {
+    const obj = JSON.parse(data);
+    if (obj.text) { target.textContent += obj.text; messagesEl.scrollTop = messagesEl.scrollHeight; }
+  } catch (_) { /* ignore */ }
+}
+
+async function sendMessage(text) {
+  if (!currentId) {
+    const conv = await api("POST", "/api/conversations", { title: text.slice(0, 40) || "New chat" });
+    currentId = conv.id;
+    await loadConversations();
+  }
+  addMessageEl("user", text);
+  const target = addMessageEl("assistant", "");
+  const res = await fetch(`/api/conversations/${currentId}/messages`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: text }),
+  });
+  if (!res.ok) { target.textContent = "[error: " + res.status + "]"; return; }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) { handleFrame(buf.slice(0, i), target); buf = buf.slice(i + 2); }
+  }
+  await loadConversations();
+}
+
 newChatBtn.addEventListener("click", newChat);
-composer.addEventListener("submit", (e) => e.preventDefault()); // streaming send wired next goal
+composer.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = promptEl.value.trim();
+  if (!text) return;
+  promptEl.value = ""; promptEl.style.height = "auto";
+  try { await sendMessage(text); } catch (err) { console.error(err); }
+});
 
 loadConversations().then(() => showEmptyHint());

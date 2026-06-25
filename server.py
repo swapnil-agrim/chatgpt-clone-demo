@@ -7,6 +7,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+import llm
 from storage import Storage
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -50,6 +51,13 @@ class Handler(BaseHTTPRequestHandler):
             title = str(data.get("title") or "").strip() or "New chat"
             cid = self.store.create_conversation(title)
             return self._send_json(self.store.get_conversation(cid), status=201)
+        if path.startswith("/api/conversations/") and path.endswith("/messages"):
+            cid = self._parse_cid(path)
+            conv = self.store.get_conversation(cid) if cid is not None else None
+            if conv is None:
+                return self._error(404, "conversation not found")
+            content = str(self._read_json().get("content") or "")
+            return self._stream_chat(cid, content)
         return self._error(404, "not found")
 
     # --- helpers ---
@@ -97,6 +105,27 @@ class Handler(BaseHTTPRequestHandler):
     def _parse_cid(path):
         head = path[len("/api/conversations/"):].split("/", 1)[0]
         return int(head) if head.isdigit() else None
+
+    def _stream_chat(self, cid, content):
+        self.store.add_message(cid, "user", content)
+        history = self.store.get_messages(cid)
+        self.close_connection = True               # body is delimited by connection close
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        parts = []
+        for chunk in llm.stream_reply(history):
+            parts.append(chunk)
+            self._sse({"text": chunk})
+        self.store.add_message(cid, "assistant", "".join(parts))
+        self._sse({}, event="done")
+
+    def _sse(self, obj, event=None):
+        frame = (f"event: {event}\n" if event else "") + f"data: {json.dumps(obj)}\n\n"
+        self.wfile.write(frame.encode())
+        self.wfile.flush()
 
 
 def create_server(port=0, host="127.0.0.1", static_dir=STATIC_DIR, db_path="chat.db"):
