@@ -34,6 +34,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_file(os.path.join(self.static_dir, "index.html"), "text/html; charset=utf-8")
         if path.startswith("/static/"):
             return self._serve_static(path[len("/static/"):])
+        if path == "/api/meta":
+            return self._send_json({"backend": llm.active_backend()})
         if path == "/api/conversations":
             return self._send_json(self.store.list_conversations())
         if path.startswith("/api/conversations/"):
@@ -56,7 +58,9 @@ class Handler(BaseHTTPRequestHandler):
             conv = self.store.get_conversation(cid) if cid is not None else None
             if conv is None:
                 return self._error(404, "conversation not found")
-            content = str(self._read_json().get("content") or "")
+            content = str(self._read_json().get("content") or "").strip()
+            if not content:
+                return self._error(400, "empty message")
             return self._stream_chat(cid, content)
         return self._error(404, "not found")
 
@@ -116,9 +120,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         parts = []
-        for chunk in llm.stream_reply(history):
-            parts.append(chunk)
-            self._sse({"text": chunk})
+        try:
+            for chunk in llm.stream_reply(history):
+                parts.append(chunk)
+                self._sse({"text": chunk})
+        except Exception as exc:                    # surface mid-stream LLM failure to the client
+            self._sse({"error": str(exc)}, event="error")
         self.store.add_message(cid, "assistant", "".join(parts))
         self._sse({}, event="done")
 

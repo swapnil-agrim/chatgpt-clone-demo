@@ -121,4 +121,16 @@ composer.addEventListener("submit", async (e) => {
   try { await sendMessage(text); } catch (err) { console.error(err); }
 });
 
+async function showBackendBanner() {
+  try {
+    const meta = await api("GET", "/api/meta");
+    if (meta.backend === "mock") {
+      const b = document.getElementById("backend-banner");
+      b.textContent = "Mock mode — set ANTHROPIC_API_KEY to stream real Claude replies.";
+      b.hidden = false;
+    }
+  } catch (_) { /* non-fatal */ }
+}
+
 loadConversations().then(() => showEmptyHint());
+showBackendBanner();
