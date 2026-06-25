@@ -13,6 +13,12 @@ from storage import Storage
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 
+def _title_from(text, limit=40):
+    """A conversation title derived from its first user message."""
+    t = " ".join(text.split())
+    return (t[:limit] + "…") if len(t) > limit else (t or "New chat")
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -113,6 +119,8 @@ class Handler(BaseHTTPRequestHandler):
     def _stream_chat(self, cid, content):
         self.store.add_message(cid, "user", content)
         history = self.store.get_messages(cid)
+        if len(history) == 1:                       # first turn: name the chat after the prompt
+            self.store.set_title(cid, _title_from(content))
         self.close_connection = True               # body is delimited by connection close
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
