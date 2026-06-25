@@ -33,6 +33,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_file(os.path.join(self.static_dir, "index.html"), "text/html; charset=utf-8")
         if path.startswith("/static/"):
             return self._serve_static(path[len("/static/"):])
+        if path == "/api/conversations":
+            return self._send_json(self.store.list_conversations())
+        if path.startswith("/api/conversations/"):
+            cid = self._parse_cid(path)
+            conv = self.store.get_conversation(cid) if cid is not None else None
+            if conv is None:
+                return self._error(404, "conversation not found")
+            return self._send_json({"conversation": conv, "messages": self.store.get_messages(cid)})
+        return self._error(404, "not found")
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        if path == "/api/conversations":
+            data = self._read_json()
+            title = str(data.get("title") or "").strip() or "New chat"
+            cid = self.store.create_conversation(title)
+            return self._send_json(self.store.get_conversation(cid), status=201)
         return self._error(404, "not found")
 
     # --- helpers ---
@@ -66,6 +83,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def _error(self, status, message):
         self._send_json({"error": message}, status=status)
+
+    def _read_json(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if not length:
+            return {}
+        try:
+            return json.loads(self.rfile.read(length).decode() or "{}")
+        except (ValueError, UnicodeDecodeError):
+            return {}
+
+    @staticmethod
+    def _parse_cid(path):
+        head = path[len("/api/conversations/"):].split("/", 1)[0]
+        return int(head) if head.isdigit() else None
 
 
 def create_server(port=0, host="127.0.0.1", static_dir=STATIC_DIR, db_path="chat.db"):
