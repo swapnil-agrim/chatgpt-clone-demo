@@ -1,0 +1,56 @@
+{
+  "_comment": "Authoritative machine config for the loop. Mirrors project.md prose; this file wins on conflict.",
+  "mode": {
+    "default": "loop"
+  },
+  "discovery": {
+    "source": "github",
+    "_source_options": "local-goals (files in .sdlc/goals/) | github (issues labelled sdlc:goal, needs the gh CLI)",
+    "github": {
+      "repo": "swapnil-agrim/chatgpt-clone-demo",
+      "goal_label": "sdlc:goal",
+      "in_progress_label": "sdlc:in-progress",
+      "parked_label": "sdlc:parked",
+      "project": {
+        "enabled": true,
+        "_comment": "Mirror issue status onto a GitHub Projects v2 board (needs the gh `project` scope). Flow: Backlog -> In Progress -> QC -> Done, Blocked for parked. Fail-open: if it can't, the loop still runs on issues+labels.",
+        "owner": "swapnil-agrim",
+        "title": "chatgpt-clone-demo — SDLC",
+        "number": null,
+        "status_field": "SDLC Status",
+        "columns": {
+          "backlog": "Backlog",
+          "in_progress": "In Progress",
+          "qc": "QC",
+          "done": "Done",
+          "blocked": "Blocked"
+        }
+      }
+    }
+  },
+  "budget": {
+    "max_iterations": 12,
+    "max_tokens": 500000,
+    "max_minutes": 480
+  },
+  "gates": {
+    "irreversible_actions": [
+      "deploy",
+      "delete",
+      "overwrite",
+      "spend",
+      "migrate"
+    ],
+    "on_block": "park"
+  },
+  "verify": {
+    "command": "python3 -m pytest -q"
+  },
+  "knowledge_graph": {
+    "enabled": true,
+    "scope": "full",
+    "_scope_options": "full (code + external research + internal analysis) | research (skip code; internal analysis + external research only)",
+    "builder": "graphify",
+    "auto_refresh": false
+  }
+}
